@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { supabase } from './supabaseClient'
+import { fetchData } from './utils/fetchApi'
 import type { Project, Milestone } from './model/types'
 
 function App() {
@@ -7,26 +7,23 @@ function App() {
   const [milestones, setMilestones] = useState<Milestone[]>([])
   const [editingProject, setEditingProject] = useState<Project | null>(null)
   const [form, setForm] = useState({ name: '', description: '' })
-  const [loading, setLoading] = useState(false)
   const [milestoneForm, setMilestoneForm] = useState<{ [projectId: number]: { name: string; due_date: string } }>({})
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('theme') === 'dark' ||
+        (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)
+    }
+    return false
+  })
 
   const fetchProjects = async () => {
-    const { data, error } = await supabase.from('projects').select('*')
-    console.log(data)
-    if (error) {
-      console.error(error)
-    } else {
-      setProjects(data as Project[])
-    }
+    const data = await fetchData.select('projects', { columns: '*' }) as Project[]
+    setProjects(data)
   }
 
   const fetchMilestones = async () => {
-    const { data, error } = await supabase.from('milestones').select('*')
-    if (error) {
-      console.error(error)
-    } else {
-      setMilestones(data as Milestone[])
-    }
+    const data = await fetchData.select('milestones', { columns: '*' }) as Milestone[]
+    setMilestones(data)
   }
 
   useEffect(() => {
@@ -34,31 +31,26 @@ function App() {
     fetchMilestones()
   }, [])
 
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('theme', isDarkMode ? 'dark' : 'light')
+    }
+  }, [isDarkMode])
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setForm({ ...form, [e.target.name]: e.target.value })
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
+  const handleSubmit = async () => {
+    if (!form.name.trim() || !form.description.trim()) return
+
     if (editingProject) {
-      // Update
-      const { error } = await supabase
-        .from('projects')
-        .update({ name: form.name, description: form.description })
-        .eq('id', editingProject.id)
-      console.log(error)
-      if (error) alert('Errore aggiornamento')
+      await fetchData.update('projects', { name: form.name, description: form.description }, { id: editingProject.id })
       setEditingProject(null)
     } else {
-      // Insert
-      const { error } = await supabase
-        .from('projects')
-        .insert([{ name: form.name, description: form.description }])
-      if (error) alert('Errore creazione')
+      await fetchData.insert('projects', { name: form.name, description: form.description })
     }
     setForm({ name: '', description: '' })
-    setLoading(false)
     fetchProjects()
   }
 
@@ -69,10 +61,10 @@ function App() {
 
   const handleDelete = async (id: number) => {
     if (!window.confirm('Sicuro di eliminare?')) return
-    setLoading(true)
-    const { error } = await supabase.from('projects').delete().eq('id', id)
-    if (error) alert('Errore eliminazione')
-    setLoading(false)
+
+    await fetchData.remove('milestones', { project_id: id })
+    await fetchData.remove('projects', { id: id })
+
     fetchProjects()
   }
 
@@ -81,7 +73,6 @@ function App() {
     setForm({ name: '', description: '' })
   }
 
-  // Milestone handlers
   const handleMilestoneFormChange = (projectId: number, e: React.ChangeEvent<HTMLInputElement>) => {
     setMilestoneForm({
       ...milestoneForm,
@@ -92,123 +83,235 @@ function App() {
     })
   }
 
-  const handleAddMilestone = async (e: React.FormEvent, projectId: number) => {
-    e.preventDefault()
-    setLoading(true)
+  const handleAddMilestone = async (projectId: number) => {
     const { name, due_date } = milestoneForm[projectId] || { name: '', due_date: '' }
     if (!name || !due_date) {
-      setLoading(false)
       return
     }
-    const { error } = await supabase
-      .from('milestones')
-      .insert([{ name, due_date, project_id: projectId, status: 1 }])
-    if (error) alert('Errore creazione milestone')
+    await fetchData.insert('milestones', { name, due_date, project_id: projectId, status: 1 })
     setMilestoneForm({ ...milestoneForm, [projectId]: { name: '', due_date: '' } })
-    setLoading(false)
     fetchMilestones()
   }
 
   const handleToggleMilestone = async (milestone: Milestone) => {
-    setLoading(true)
     const newStatus = milestone.status === 2 ? 1 : 2
-    const { error } = await supabase
-      .from('milestones')
-      .update({ status: newStatus })
-      .eq('id', milestone.id)
-    if (error) alert('Errore update milestone')
-    setLoading(false)
+    await fetchData.update('milestones', { status: newStatus }, { id: milestone.id })
     fetchMilestones()
   }
 
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('it-IT', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric'
+    })
+  }
+
+  const getProjectMilestones = (projectId: number) => {
+    return milestones
+      .filter((m) => m.project_id === projectId)
+      .sort((a, b) => a.due_date.localeCompare(b.due_date))
+  }
+
+  const getProjectProgress = (projectId: number) => {
+    const projectMilestones = getProjectMilestones(projectId)
+    if (projectMilestones.length === 0) return 0
+    const completed = projectMilestones.filter(m => m.status === 2).length
+    return Math.round((completed / projectMilestones.length) * 100)
+  }
+
+
   return (
-    <div style={{ padding: '2rem', maxWidth: 600, margin: '0 auto' }}>
-      <h1>📁 I Miei Progetti</h1>
-      <form onSubmit={handleSubmit} style={{ marginBottom: 32 }}>
+    <div className="project-tracker">
+    <div className="project-tracker__content">
+      <header className="project-tracker__header">
+        <h1 className="project-tracker__title">
+          📋 Project Tracker
+        </h1>
+        <p className="project-tracker__subtitle">
+          Gestisci i tuoi progetti e milestone
+        </p>
+      </header>
+
+      {/* Form per creare/modificare progetti */}
+      <div className="card card--form">
+        <h3 className="form-section__title">
+          {editingProject ? '✏️ Modifica Progetto' : '➕ Nuovo Progetto'}
+        </h3>
+        
         <input
           name="name"
           placeholder="Nome progetto"
           value={form.name}
           onChange={handleChange}
-          required
-          style={{ width: '100%', marginBottom: 8, padding: 8 }}
+          className="input"
         />
+        
         <textarea
           name="description"
-          placeholder="Descrizione"
+          placeholder="Descrizione progetto..."
           value={form.description}
           onChange={handleChange}
-          required
-          style={{ width: '100%', marginBottom: 8, padding: 8 }}
+          rows={3}
+          className="input textarea"
         />
-        <button type="submit" disabled={loading} style={{ marginRight: 8 }}>
-          {editingProject ? 'Salva modifiche' : 'Crea progetto'}
-        </button>
-        {editingProject && (
-          <button type="button" onClick={handleCancel} disabled={loading}>
-            Annulla
+        
+        <div>
+          <button onClick={handleSubmit} className="btn btn--primary">
+            {editingProject ? '💾 Salva modifiche' : '✨ Crea progetto'}
           </button>
+          {editingProject && (
+            <button onClick={handleCancel} className="btn btn--secondary">
+              ❌ Annulla
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Lista progetti */}
+      <div>
+        {projects.map((project) => {
+          const projectMilestones = getProjectMilestones(project.id)
+          const progress = getProjectProgress(project.id)
+          
+          return (
+            <div key={project.id} className="card project-card">
+              <div className="project-card__header">
+                <div className="project-card__content">
+                  <h2 className="project-card__title">
+                    {project.name}
+                  </h2>
+                  <p className="project-card__description">
+                    {project.description}
+                  </p>
+                  
+                  {projectMilestones.length > 0 && (
+                    <div className="progress-section">
+                      <div className="progress-info">
+                        <span>Progresso: {progress}%</span>
+                        <span>({projectMilestones.filter(m => m.status === 2).length}/{projectMilestones.length})</span>
+                      </div>
+                      <div className="progress-bar">
+                        <div 
+                          className={`progress-bar__fill ${progress === 100 ? 'progress-bar__fill--complete' : 'progress-bar__fill--incomplete'}`}
+                          style={{ width: `${progress}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+                
+                <div className="project-card__actions">
+                  <button 
+                    onClick={() => handleEdit(project)} 
+                    className="btn btn--secondary btn--icon"
+                    title="Modifica progetto"
+                  >
+                    ✏️
+                  </button>
+                  <button 
+                    onClick={() => handleDelete(project.id)} 
+                    className="btn btn--danger btn--icon"
+                    title="Elimina progetto"
+                  >
+                    🗑️
+                  </button>
+                </div>
+              </div>
+
+              {/* Sezione Timeline Milestone */}
+              <div className="timeline-section">
+                <h4 className="timeline-header">
+                  🎯 Milestone
+                  <span className="timeline-badge">
+                    {projectMilestones.length}
+                  </span>
+                </h4>
+                
+                {projectMilestones.length > 0 && (
+                  <div className="timeline">
+                    <div className="timeline__line" />
+                    {projectMilestones.map((milestone, index) => (
+                      <div key={milestone.id} className="timeline-item">
+                        <div className={`timeline-item__dot ${milestone.status === 2 ? 'timeline-item__dot--completed' : 'timeline-item__dot--pending'}`} />
+                        
+                        <div className={`timeline-item__content ${milestone.status === 2 ? 'timeline-item__content--completed' : 'timeline-item__content--pending'}`}>
+                          <div className="timeline-item__main">
+                            <input
+                              type="checkbox"
+                              checked={milestone.status === 2}
+                              onChange={() => handleToggleMilestone(milestone)}
+                              className="timeline-item__checkbox"
+                            />
+                            
+                            <div className="timeline-item__details">
+                              <div className={`timeline-item__name ${milestone.status === 2 ? 'timeline-item__name--completed' : ''}`}>
+                                {milestone.name}
+                              </div>
+                              
+                              <div className="timeline-item__meta">
+                                📅 {formatDate(milestone.due_date)}
+                                {milestone.status === 2 && (
+                                  <span className="timeline-item__status">
+                                    ✓ Completato
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                
+                {/* Form per aggiungere nuove milestone */}
+                <div className="milestone-form">
+                  <div className="milestone-form__grid">
+                    <input
+                      name="name"
+                      placeholder="Nuova milestone..."
+                      value={milestoneForm[project.id]?.name || ''}
+                      onChange={(e) => handleMilestoneFormChange(project.id, e)}
+                      className="input"
+                    />
+                    
+                    <input
+                      name="due_date"
+                      type="date"
+                      value={milestoneForm[project.id]?.due_date || ''}
+                      onChange={(e) => handleMilestoneFormChange(project.id, e)}
+                      className="input"
+                    />
+                    
+                    <button 
+                      onClick={() => handleAddMilestone(project.id)}
+                      className="btn btn--primary"
+                    >
+                      ➕ Aggiungi
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )
+        })}
+        
+        {/* Empty state */}
+        {projects.length === 0 && (
+          <div className="card card--empty">
+            <div className="empty-state__icon">📝</div>
+            <h3 className="empty-state__title">
+              Nessun progetto ancora
+            </h3>
+            <p className="empty-state__text">
+              Inizia creando il tuo primo progetto usando il form qui sopra!
+            </p>
+          </div>
         )}
-      </form>
-      <ul style={{ listStyle: 'none', padding: 0 }}>
-        {projects.map((p) => (
-          <li key={p.id} style={{ marginBottom: 32, border: '1px solid #ccc', borderRadius: 8, padding: 16 }}>
-            <strong>{p.name}</strong> — {p.description}
-            <div style={{ marginTop: 8 }}>
-              <button onClick={() => handleEdit(p)} style={{ marginRight: 8 }} disabled={loading}>
-                Modifica
-              </button>
-              <button onClick={() => handleDelete(p.id)} disabled={loading}>
-                Elimina
-              </button>
-            </div>
-            {/* Milestone timeline */}
-            <div style={{ marginTop: 16, borderTop: '1px solid #eee', paddingTop: 12 }}>
-              <h4 style={{ margin: 0, marginBottom: 8 }}>Milestone</h4>
-              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                {milestones
-                  .filter((m) => m.project_id === p.id)
-                  .sort((a, b) => a.due_date.localeCompare(b.due_date))
-                  .map((m) => (
-                    <li key={m.id} style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
-                      <input
-                        type="checkbox"
-                        checked={m.status === 2}
-                        onChange={() => handleToggleMilestone(m)}
-                        style={{ marginRight: 8 }}
-                      />
-                      <span style={{ textDecoration: m.status === 2 ? 'line-through' : 'none' }}>
-                        {m.name} <span style={{ color: '#888', fontSize: 12 }}>({m.due_date})</span>
-                      </span>
-                    </li>
-                  ))}
-              </ul>
-              <form onSubmit={(e) => handleAddMilestone(e, p.id)} style={{ marginTop: 8, display: 'flex', gap: 8 }}>
-                <input
-                  name="name"
-                  placeholder="Nome milestone"
-                  value={milestoneForm[p.id]?.name || ''}
-                  onChange={(e) => handleMilestoneFormChange(p.id, e)}
-                  required
-                  style={{ flex: 2, padding: 6 }}
-                />
-                <input
-                  name="due_date"
-                  type="date"
-                  value={milestoneForm[p.id]?.due_date || ''}
-                  onChange={(e) => handleMilestoneFormChange(p.id, e)}
-                  required
-                  style={{ flex: 1, padding: 6 }}
-                />
-                <button type="submit" disabled={loading} style={{ flex: 1 }}>
-                  Aggiungi
-                </button>
-              </form>
-            </div>
-          </li>
-        ))}
-      </ul>
+      </div>
     </div>
+  </div>
   )
 }
 
