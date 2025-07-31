@@ -1,5 +1,5 @@
-import { PostgrestFilterBuilder } from '@supabase/supabase-js'
-import { supabase } from '../supabaseClient'
+  import { SupabaseClient } from '@supabase/supabase-js'
+  import { supabase } from '../supabaseClient'
 
 type Operator =
   | 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte'
@@ -13,7 +13,7 @@ type Filter =
 
 
 
-function applyFilter<T>(query: PostgrestFilterBuilder<T>, filter: Filter): PostgrestFilterBuilder<T> {
+function applyFilter<T>(query: any, filter: Filter): any {
   const [op, ...args] = filter
   switch (op) {
     case 'or':
