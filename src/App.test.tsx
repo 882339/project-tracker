@@ -2,15 +2,12 @@
 import React from 'react'
 import { render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import App  from '../src/App' 
+import App from './App' 
 
-vi.mock('../src/utils/fetchApi', () => ({
-  fetchProjects: vi.fn().mockResolvedValue([
-    { id: 1, name: 'Test Project', description: '', status: '', progress: 0 }
-  ]),
-  fetchMilestones: vi.fn().mockResolvedValue([
-    { id: 1, name: 'M1', project_id: 1, due_date: '2025-12-01' }
-  ])
+vi.mock('./utils/fetchApi', () => ({
+  fetchData: {
+    select: vi.fn().mockResolvedValue([])  // restituisce array vuoto (oppure dati finti)
+  }
 }))
 
 describe('App component', () => {
@@ -18,4 +15,4 @@ describe('App component', () => {
     render(<App />)
     expect(await screen.findByText('Project Tracker')).toBeInTheDocument()
   })
-})
+}) 
