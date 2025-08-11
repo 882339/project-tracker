@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react'
 import { fetchData } from './utils/fetchApi'
 import type { Project, Milestone } from './model/types'
+import { fetchProjects, fetchMilestones } from './utils/fetchUtils'
+
+// Export functions for testing
+
 
 import {
   Box,
@@ -30,20 +34,16 @@ function App() {
   const [milestoneForm, setMilestoneForm] = useState<Record<number, { name: string; due_date: string }>>({})
 
   // === Fetch data ===
+  const fetchAllData = async () => {
+    const projects = await fetchProjects()
+    const milestones = await fetchMilestones()
+    setProjects(projects)
+    setMilestones(milestones)
+  }
   useEffect(() => {
-    fetchProjects()
-    fetchMilestones()
+    fetchAllData()
   }, [])
 
-  const fetchProjects = async () => {
-    const data = await fetchData.select('projects', { columns: '*' }) as Project[]
-    setProjects(data)
-  }
-
-  const fetchMilestones = async () => {
-    const data = await fetchData.select('milestones', { columns: '*' }) as Milestone[]
-    setMilestones(data)
-  }
 
   // === Form handling ===
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
@@ -60,7 +60,7 @@ function App() {
     }
 
     setForm({ name: '', description: '' })
-    fetchProjects()
+    fetchAllData()
   }
 
   const handleEdit = (project: Project) => {
@@ -72,7 +72,7 @@ function App() {
     if (!confirm('Sicuro di eliminare?')) return
     await fetchData.remove('milestones', { project_id: id })
     await fetchData.remove('projects', { id })
-    fetchProjects()
+    fetchAllData()
   }
 
   const handleCancel = () => {
@@ -96,24 +96,15 @@ function App() {
 
     await fetchData.insert('milestones', { name, due_date, project_id: projectId, status: 1 })
     setMilestoneForm(prev => ({ ...prev, [projectId]: { name: '', due_date: '' } }))
-    fetchMilestones()
+    fetchAllData()
   }
 
-  const handleToggleMilestone = async (m: Milestone) => {
-    const newStatus = m.status === 2 ? 1 : 2
-    await fetchData.update('milestones', { status: newStatus }, { id: m.id })
-    fetchMilestones()
-  }
 
   // === Helpers ===
   const getProjectMilestones = (projectId: number) =>
     milestones.filter(m => m.project_id === projectId).sort((a, b) => a.due_date.localeCompare(b.due_date))
 
-  const getProjectProgress = (projectId: number) => {
-    const ms = getProjectMilestones(projectId)
-    const completed = ms.filter(m => m.status === 2).length
-    return ms.length === 0 ? 0 : Math.round((completed / ms.length) * 100)
-  }
+
 
   return (
     <Container maxWidth="md" sx={{ py: 6 }}>
